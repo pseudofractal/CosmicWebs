@@ -1,0 +1,20 @@
+[project]
+name = "cosmic-webs"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.4.4",
+    "plotly>=6.7.0",
+    "scipy>=1.17.1",
+]
+
+[tool.ruff]
+line-length = 88
+indent-width = 2
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"

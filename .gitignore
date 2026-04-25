@@ -1,0 +1,5 @@
+/target
+/data
+/.opencode/
+__pycache__/
+*.pyc
