@@ -33,12 +33,14 @@ ISOSURFACE_SCALE = [
 ]
 
 
-def load_field(name: str) -> np.ndarray:
-  return np.load(DATA_DIR / f"{name}.npy")
+def load_field(name: str, prefix: str = "") -> np.ndarray:
+  return np.load(DATA_DIR / f"{prefix}{name}.npy")
 
 
-def load_config() -> dict[str, float]:
-  box_size, n_mesh, n_particles, growth_factor, ic_amplitude = load_field("config")
+def load_config(prefix: str = "") -> dict[str, float]:
+  box_size, n_mesh, n_particles, growth_factor, ic_amplitude = load_field(
+    "config", prefix
+  )
   return {
     "box_size": float(box_size),
     "n_mesh": int(round(n_mesh)),
@@ -129,10 +131,16 @@ def add_heatmap(
   )
 
 
-def plot_density_slices(box_size: float, growth_factor: float):
-  xy = load_field("final_delta_xy_slice")
-  xz = load_field("final_delta_xz_slice")
-  yz = load_field("final_delta_yz_slice")
+def plot_density_slices(
+  box_size: float,
+  growth_factor: float,
+  data_prefix: str = "",
+  html_prefix: str = "",
+  subtitle_suffix: str = "",
+):
+  xy = load_field("final_delta_xy_slice", data_prefix)
+  xz = load_field("final_delta_xz_slice", data_prefix)
+  yz = load_field("final_delta_yz_slice", data_prefix)
   x = np.linspace(0.0, box_size, xy.shape[0], endpoint=False)
   y = np.linspace(0.0, box_size, xy.shape[1], endpoint=False)
   z = np.linspace(0.0, box_size, xz.shape[1], endpoint=False)
@@ -152,7 +160,7 @@ def plot_density_slices(box_size: float, growth_factor: float):
   fig.update_layout(
     title=(
       f"Cosmic Web Cross-Sections"
-      f"<br><sup>Central density slices at D={growth_factor:.1f}</sup>"
+      f"<br><sup>Central density slices at D={growth_factor:.1f}{subtitle_suffix}</sup>"
     ),
     height=560,
     width=1480,
@@ -160,12 +168,18 @@ def plot_density_slices(box_size: float, growth_factor: float):
   fig.update_annotations(font=dict(color=TEXT, size=16))
   style_figure(fig)
 
-  outpath = DOCS_DIR / "density_slices.html"
+  outpath = DOCS_DIR / f"{html_prefix}density_slices.html"
   fig.write_html(outpath, include_plotlyjs="cdn")
   print(f"Saved {outpath}")
 
 
-def plot_density_isosurfaces(field: np.ndarray, box_size: float, growth_factor: float):
+def plot_density_isosurfaces(
+  field: np.ndarray,
+  box_size: float,
+  growth_factor: float,
+  html_prefix: str = "",
+  subtitle_suffix: str = "",
+):
   X, Y, Z = make_coordinates(field.shape, box_size)
   values = field.ravel()
   isomin = float(np.percentile(values, 94.0))
@@ -191,7 +205,8 @@ def plot_density_isosurfaces(field: np.ndarray, box_size: float, growth_factor: 
   fig.update_layout(
     title=(
       f"Cosmic Web Volume"
-      f"<br><sup>Interactive high-density isosurfaces at D={growth_factor:.1f}</sup>"
+      "<br><sup>Interactive high-density isosurfaces "
+      f"at D={growth_factor:.1f}{subtitle_suffix}</sup>"
     ),
     scene=dict(
       xaxis=dict(
@@ -225,20 +240,23 @@ def plot_density_isosurfaces(field: np.ndarray, box_size: float, growth_factor: 
   )
   style_figure(fig)
 
-  outpath = DOCS_DIR / "density_isosurfaces.html"
+  outpath = DOCS_DIR / f"{html_prefix}density_isosurfaces.html"
   fig.write_html(outpath, include_plotlyjs="cdn")
   print(f"Saved {outpath}")
   print(f"isomin = {isomin:.6g}, isomax = {isomax:.6g}")
 
 
-def main():
-  DOCS_DIR.mkdir(parents=True, exist_ok=True)
-
-  config = load_config()
-  field = load_field("final_delta")
+def render_dataset(
+  data_prefix: str = "",
+  html_prefix: str = "",
+  subtitle_suffix: str = "",
+):
+  config = load_config(data_prefix)
+  field = load_field("final_delta", data_prefix)
 
   print(
     "Loaded config:",
+    f"prefix={data_prefix or 'default'}",
     f"n_mesh={config['n_mesh']}",
     f"n_particles={config['n_particles']}",
     f"box_size={config['box_size']}",
@@ -246,8 +264,36 @@ def main():
     f"ic_amplitude={config['ic_amplitude']}",
   )
 
-  plot_density_slices(config["box_size"], config["growth_factor"])
-  plot_density_isosurfaces(field, config["box_size"], config["growth_factor"])
+  plot_density_slices(
+    config["box_size"],
+    config["growth_factor"],
+    data_prefix,
+    html_prefix,
+    subtitle_suffix,
+  )
+  plot_density_isosurfaces(
+    field,
+    config["box_size"],
+    config["growth_factor"],
+    html_prefix,
+    subtitle_suffix,
+  )
+
+
+def main():
+  DOCS_DIR.mkdir(parents=True, exist_ok=True)
+
+  render_dataset()
+  render_dataset(
+    data_prefix="no_powa_",
+    html_prefix="no_powa_",
+    subtitle_suffix=", white-noise initial field",
+  )
+  render_dataset(
+    data_prefix="k_powa_",
+    html_prefix="k_powa_",
+    subtitle_suffix=", P(k)=k initial field",
+  )
   outpath = write_index()
   print(f"Saved {outpath}")
 

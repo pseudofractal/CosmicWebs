@@ -2,11 +2,18 @@ use std::f64::consts::PI;
 
 use ndarray::{Array1, Array2, Array3, ArrayBase, Data, Dimension};
 use ndarray_npy::write_npy;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use rand_distr::StandardNormal;
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{num_complex::Complex, FftPlanner};
 
 const REALIZATION_SEED: u64 = 4;
+
+#[derive(Debug, Clone, Copy)]
+enum SpectrumMode {
+  PowerSpectrum,
+  WhiteNoise,
+  LinearK,
+}
 
 #[derive(Debug)]
 struct Config {
@@ -194,7 +201,12 @@ fn power_spectrum(k: f64, box_size: f64) -> f64 {
   k.powf(spectral_index) * low_k_taper * high_k_taper
 }
 
-fn create_delta_k(n: usize, box_size: f64, ic_amplitude: f64) -> Array3<Complex<f64>> {
+fn create_delta_k(
+  n: usize,
+  box_size: f64,
+  ic_amplitude: f64,
+  spectrum_mode: SpectrumMode,
+) -> Array3<Complex<f64>> {
   let mut rng = StdRng::seed_from_u64(REALIZATION_SEED);
   let mut delta_k = Array3::<Complex<f64>>::zeros((n, n, n));
 
@@ -223,8 +235,13 @@ fn create_delta_k(n: usize, box_size: f64, ic_amplitude: f64) -> Array3<Complex<
         let ky = 2.0 * PI * kj as f64 / box_size;
         let kz = 2.0 * PI * kz_index as f64 / box_size;
         let k2 = kx * kx + ky * ky + kz * kz;
+        let k_mag = k2.sqrt();
         let self_conjugate = i == ii && j == jj && k == kk;
-        let amp = ic_amplitude * power_spectrum(k2.sqrt(), box_size).sqrt();
+        let amp = match spectrum_mode {
+          SpectrumMode::PowerSpectrum => ic_amplitude * power_spectrum(k_mag, box_size).sqrt(),
+          SpectrumMode::WhiteNoise => ic_amplitude,
+          SpectrumMode::LinearK => ic_amplitude * k_mag.sqrt(),
+        };
 
         if self_conjugate {
           let re: f64 = rng.sample(StandardNormal);
@@ -618,29 +635,30 @@ where
   Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let config = Config {
-    n_particles: 64,
-    n_mesh: 64,
-    box_size: 1600.0,
-    growth_factor: 55.0,
-    ic_amplitude: 90.0,
-  };
-
-  assert_eq!(config.n_particles, config.n_mesh);
-
-  let particles = create_particles(&config);
-  let delta_k = create_delta_k(config.n_mesh, config.box_size, config.ic_amplitude);
+fn run_realization(
+  config: &Config,
+  prefix: &str,
+  spectrum_mode: SpectrumMode,
+) -> Result<(), Box<dyn std::error::Error>> {
+  let particles = create_particles(config);
+  let delta_k = create_delta_k(
+    config.n_mesh,
+    config.box_size,
+    config.ic_amplitude,
+    spectrum_mode,
+  );
   let (eig1, eig2, eig3) = compute_deformation_eigenvalues_from_delta_k(&delta_k, config.box_size);
   let web = classify_web_from_eigenvalues(&eig1, &eig2, &eig3, config.growth_factor);
   let fractions = web_fractions(&web);
+  println!("[{prefix}]");
   println!("Void fraction:     {}", fractions[0]);
   println!("Pancake fraction: {}", fractions[1]);
   println!("Filament fraction:{}", fractions[2]);
   println!("Knot fraction:    {}", fractions[3]);
+
   let (psi_x, psi_y, psi_z) = compute_displacement_from_delta_k(&delta_k, config.box_size);
-  let displaced_particles = displace_particles(&config, &particles, &psi_x, &psi_y, &psi_z);
-  let density = deposit_cic(&config, &displaced_particles);
+  let displaced_particles = displace_particles(config, &particles, &psi_x, &psi_y, &psi_z);
+  let density = deposit_cic(config, &displaced_particles);
   let final_delta = density_to_contrast(&density);
 
   let final_delta_xy_slice = central_slice_xy(&final_delta);
@@ -654,13 +672,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.ic_amplitude,
   ]);
 
-  save_npy("config", &config_metadata)?;
-  save_npy("final_delta", &final_delta)?;
-  save_npy("final_delta_xy_slice", &final_delta_xy_slice)?;
-  save_npy("final_delta_xz_slice", &final_delta_xz_slice)?;
-  save_npy("final_delta_yz_slice", &final_delta_yz_slice)?;
+  save_npy(&format!("{prefix}config"), &config_metadata)?;
+  save_npy(&format!("{prefix}final_delta"), &final_delta)?;
+  save_npy(
+    &format!("{prefix}final_delta_xy_slice"),
+    &final_delta_xy_slice,
+  )?;
+  save_npy(
+    &format!("{prefix}final_delta_xz_slice"),
+    &final_delta_xz_slice,
+  )?;
+  save_npy(
+    &format!("{prefix}final_delta_yz_slice"),
+    &final_delta_yz_slice,
+  )?;
 
-  println!("Saved density field and central slices with seed {REALIZATION_SEED}");
+  println!("Saved {prefix}density field and central slices with seed {REALIZATION_SEED}");
+
+  Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let config = Config {
+    n_particles: 64,
+    n_mesh: 64,
+    box_size: 1600.0,
+    growth_factor: 55.0,
+    ic_amplitude: 90.0,
+  };
+
+  assert_eq!(config.n_particles, config.n_mesh);
+
+  run_realization(&config, "", SpectrumMode::PowerSpectrum)?;
+  run_realization(&config, "no_powa_", SpectrumMode::WhiteNoise)?;
+  run_realization(&config, "k_powa_", SpectrumMode::LinearK)?;
 
   Ok(())
 }
